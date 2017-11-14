@@ -48,9 +48,10 @@ public class ParameterValidHandler {
 	 * 
 	 * @param joinPoint
 	 * @return
+	 * @throws 
 	 */
 	@Around("@annotation(com.chemcn.ec.servicecenter.finance.service.paramValidation.ValidateGroup)")
-	public Object validHandle(ProceedingJoinPoint joinPoint) {
+	public Object validHandle(ProceedingJoinPoint joinPoint) throws Throwable {
 		ResultDO result; // 接口统一返回值
 		String methodName = joinPoint.getSignature().getName(); // 拦截的方法名
 		Class<?> clazz = joinPoint.getTarget().getClass(); // 类
@@ -60,19 +61,12 @@ public class ParameterValidHandler {
 		Object[] args = joinPoint.getArgs(); // 拦截方法的参数
 		ValidateGroup an = (ValidateGroup) method.getAnnotation(ValidateGroup.class); // 获取@ValidateGroup注解
 		this.printStartInfo(args, methodName, clazz); // 打印方法调用开始日志
-		try {
-			returnObj = returnClass.newInstance(); // 生成返回值实例
-			result = this.validateFields(an.fields(), args); // 验证参数
-			BeanUtil.copyProperties(result, returnObj);
-			if (result.isSuccess()) {
-				returnObj = joinPoint.proceed(); // 验证通过 , 0执行方法体
-				this.printEndInfo(methodName, returnObj, clazz); // 打印方法调用结束日志
-			}
-		} catch (Throwable e) {
-			result = new ResultDO();
-			result.setSuccess(FAILURE);
-			result.setMessage("验证参数发生错误:" + e.getMessage());
-			BeanUtil.copyProperties(result, returnObj);
+		returnObj = returnClass.newInstance(); // 生成返回值实例
+		result = this.validateFields(an.fields(), args); // 验证参数
+		BeanUtil.copyProperties(result, returnObj);
+		if (result.isSuccess()) {
+			returnObj = joinPoint.proceed(); // 验证通过 , 0执行方法体
+			this.printEndInfo(methodName, returnObj, clazz); // 打印方法调用结束日志
 		}
 		return returnObj;
 	}
@@ -113,24 +107,25 @@ public class ParameterValidHandler {
 			if ("".equals(validField.fieldName())) {
 				arg = args[validField.index()];
 				result = this.doValidation(validField, arg);
-			}
-			// 如果是集合类型
-			else if (validField.isCollection()) {
-				// 获取到集合
-				Object collection = getObjectFieldByName(args[validField.index()],
-						validField.fieldName().split(SEPERATOR)[0]);
-				// 转换成collection
-				if (collection instanceof Collection<?>) {
-					Collection<?> c = (Collection<?>) collection;
-					result = this.validateCollection(c, validField);
-				} else {
+			}else{
+				// 校验fieldName格式
+				if(this.validRegex(validField.fieldName())){
+					// if collection
+					if(validField.isCollection()){
+						// 获取到集合
+						Object collection = getObjectFieldByName(args[validField.index()],
+								validField.fieldName().split(SEPERATOR)[0]);
+						// 验证集合
+						result = this.validateCollection(collection , validField);
+					}
+					// if object
+					else{
+						result = validateObject(args[validField.index()], validField);
+					}
+				}else{
 					result.setSuccess(FAILURE);
-					result.setMessage("参数验证失败:" + validField.fieldName() + "不是集合类型");
+					result.setMessage("参数验证失败:fieldName格式错误");
 				}
-			}
-			// 非空字符串则表示需要验证当前对象的属性
-			else {
-				result = validateObject(args[validField.index()], validField);
 			}
 			if (!result.isSuccess()) {
 				return result;
@@ -163,43 +158,60 @@ public class ParameterValidHandler {
 		ResultDO result = new ResultDO();
 		result.setMessage("");
 		String objFieldName = validField.fieldName();
-		if(!objFieldName.matches(REGEXP_FIELD_NAME)){
-			result.setMessage("参数验证失败:fieldName格式错误");
+		String objName = objFieldName.split(this.SEPERATOR)[0]; // 对象名
+		String fieldName = objFieldName.split(this.SEPERATOR)[1]; // 对象属性名
+		Object objField = getObjectFieldByName(obj, objName);
+		if(objField == null){
+			result.setMessage(objName+"不能为null");
 			result.setSuccess(FAILURE);
 			return result ;
 		}
-		String objName = objFieldName.split(this.SEPERATOR)[0]; // 对象名
-		String fieldName = objFieldName.split(this.SEPERATOR)[1]; // 对象属性名
-		Object objField = getObjectFieldByName(obj, objName); //
 		Object value = getObjectFieldByName(objField, fieldName);
 		result = this.doValidation(validField, value);
 		return result;
 	}
 
-	private ResultDO validateCollection(Collection<?> c, ValidateField validField) throws NoSuchFieldException,
+	private ResultDO validateCollection(Object c, ValidateField validField) throws NoSuchFieldException,
 			SecurityException, IllegalArgumentException, IllegalAccessException {
 		ResultDO result = new ResultDO();
 		result.setMessage("");
-		Object arg;
-		for (Object object : c) {
-			String fieldName = validField.fieldName().split(SEPERATOR)[1];
-			arg = this.getObjectFieldByName(object, fieldName);
-			result = this.doValidation(validField, arg);
-			if (!result.isSuccess()) {
-				break;
+		Collection<?> collection ;
+		if(c == null){
+			result.setMessage(validField.fieldName().split(SEPERATOR)[0]+"不能为空");
+			result.setSuccess(FAILURE);
+			return result ;
+		}
+		if(c instanceof Collection<?>){
+			collection = (Collection<?>)c ;
+			Object arg;
+			for (Object object : collection) {
+				String fieldName = validField.fieldName().split(SEPERATOR)[1];
+				arg = this.getObjectFieldByName(object, fieldName);
+				result = this.doValidation(validField, arg);
+				if (!result.isSuccess()) {
+					break;
+				}
 			}
+		}else {
+			result.setSuccess(FAILURE);
+			result.setMessage("参数验证失败:" + validField.fieldName().split(SEPERATOR)[0] + "不是集合类型");
 		}
 		return result;
 	}
 
-	private ResultDO doValidation(ValidateField validField, Object arg) {
+	private ResultDO doValidation(ValidateField validField, Object value) {
 		ResultDO result = new ResultDO();
 		result.setMessage("");
 		StringBuilder builder = new StringBuilder(result.getMessage());
-
+		if(validField.notNull()){
+			if(value == null){
+				result.setSuccess(FAILURE);
+				builder = builder.append(validField.errorMsg());
+			}
+		}
 		// 非null及非空字符串验证
 		if (validField.notEmpty()) {
-			if (arg == null || "".equals(arg)) {
+			if (value == null || "".equals(value)) {
 				result.setSuccess(FAILURE);
 				builder = builder.append(validField.errorMsg());
 			}
@@ -253,6 +265,10 @@ public class ParameterValidHandler {
 	 */
 	private void printEndInfo(String methodName, Object returnParam, Class<?> clazz) {
 		logger.info("类：" + clazz.getName() + "方法为:" + methodName + "执行结束:出参为:" + JSON.toJSONString(returnParam));
+	}
+	
+	private boolean validRegex(String fieldName){
+		return fieldName.matches(REGEXP_FIELD_NAME) ;
 	}
 
 }
