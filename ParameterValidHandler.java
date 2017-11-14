@@ -25,7 +25,7 @@ import com.chemcn.ec.api.common.pojo.ResultDO;
  * 只需要在方法上增加注解 , 注解的格式如下
  * <p>
  * {@code @ValidateGroup(fields = (
- * {@code @ValidateField(index = 0, fieldName = "marginPayDto.buyerId", notNull = true, errorMsg = "买家ID不能为null")...}
+ * 				{@code @ValidateField(index = 0, fieldName = "marginPayDto.buyerId", notNull = true, errorMsg = "买家ID不能为null")}...}
  * 
  * @author Mrlxf
  *
@@ -37,6 +37,8 @@ public class ParameterValidHandler {
 	private final Logger logger = LoggerFactory.getLogger(getClass());
 
 	private final String SEPERATOR = "\\.";
+	
+	private final String REGEXP_FIELD_NAME = "\\w+\\.\\w+" ;
 
 	private final Boolean FAILURE = false;
 
@@ -63,7 +65,7 @@ public class ParameterValidHandler {
 			result = this.validateFields(an.fields(), args); // 验证参数
 			BeanUtil.copyProperties(result, returnObj);
 			if (result.isSuccess()) {
-				returnObj = joinPoint.proceed(); // 执行方法体
+				returnObj = joinPoint.proceed(); // 验证通过 , 0执行方法体
 				this.printEndInfo(methodName, returnObj, clazz); // 打印方法调用结束日志
 			}
 		} catch (Throwable e) {
@@ -75,6 +77,7 @@ public class ParameterValidHandler {
 		return returnObj;
 	}
 
+	/** 通过类和方法名称获取对应的Method对象 */
 	private Method getMethodByNameAndClazz(Class<?> clazz, String methodName) {
 		Method[] methods = clazz.getDeclaredMethods();
 		for (Method method : methods) {
@@ -129,8 +132,8 @@ public class ParameterValidHandler {
 			else {
 				result = validateObject(args[validField.index()], validField);
 			}
-			if(!result.isSuccess()){
-				return result ;
+			if (!result.isSuccess()) {
+				return result;
 			}
 		}
 		return result;
@@ -160,6 +163,11 @@ public class ParameterValidHandler {
 		ResultDO result = new ResultDO();
 		result.setMessage("");
 		String objFieldName = validField.fieldName();
+		if(!objFieldName.matches(REGEXP_FIELD_NAME)){
+			result.setMessage("参数验证失败:fieldName格式错误");
+			result.setSuccess(FAILURE);
+			return result ;
+		}
 		String objName = objFieldName.split(this.SEPERATOR)[0]; // 对象名
 		String fieldName = objFieldName.split(this.SEPERATOR)[1]; // 对象属性名
 		Object objField = getObjectFieldByName(obj, objName); //
@@ -196,7 +204,7 @@ public class ParameterValidHandler {
 				builder = builder.append(validField.errorMsg());
 			}
 		}
-		
+
 		// ...其他验证
 		result.setMessage(builder.toString());
 		return result;
