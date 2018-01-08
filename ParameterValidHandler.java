@@ -66,8 +66,8 @@ public class ParameterValidHandler {
 		BeanUtil.copyProperties(result, returnObj);
 		if (result.isSuccess()) {
 			returnObj = joinPoint.proceed(); // 验证通过 , 0执行方法体
-			this.printEndInfo(methodName, returnObj, clazz); // 打印方法调用结束日志
 		}
+		this.printEndInfo(methodName, returnObj, clazz); // 打印方法调用结束日志
 		return returnObj;
 	}
 
